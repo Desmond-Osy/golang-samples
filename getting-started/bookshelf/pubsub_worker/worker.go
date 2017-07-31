@@ -15,11 +15,11 @@ import (
 	"strings"
 	"sync"
 
+	books "google.golang.org/api/books/v1"
+
 	"cloud.google.com/go/pubsub"
 
 	"golang.org/x/net/context"
-
-	"google.golang.org/api/books/v1"
 
 	"github.com/GoogleCloudPlatform/golang-samples/getting-started/bookshelf"
 )
@@ -50,7 +50,7 @@ func main() {
 	// ignore returned errors, which will be "already exists". If they're fatal
 	// errors, then following calls (e.g. in the subscribe function) will also fail.
 	topic, _ := bookshelf.PubsubClient.CreateTopic(ctx, bookshelf.PubsubTopicID)
-	subscription, _ = bookshelf.PubsubClient.CreateSubscription(ctx, subName, topic, 0, nil)
+	subscription, _ = bookshelf.PubsubClient.CreateSubscription(ctx, subName, pubsub.SubscriptionConfig{Topic: topic})
 
 	// Start worker goroutine.
 	go subscribe()
@@ -73,37 +73,30 @@ func main() {
 
 func subscribe() {
 	ctx := context.Background()
-	it, err := subscription.Pull(ctx)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for {
-		msg, err := it.Next()
-		if err != nil {
-			log.Fatalf("could not pull: %v", err)
-		}
+	err := subscription.Receive(ctx, func(ctx context.Context, msg *pubsub.Message) {
 		var id int64
 		if err := json.Unmarshal(msg.Data, &id); err != nil {
 			log.Printf("could not decode message data: %#v", msg)
-			msg.Done(true)
-			continue
+			msg.Ack()
+			return
 		}
 
 		log.Printf("[ID %d] Processing.", id)
-		go func() {
-			if err := update(id); err != nil {
-				log.Printf("[ID %d] could not update: %v", id, err)
-				msg.Done(false) // NACK
-				return
-			}
+		if err := update(id); err != nil {
+			log.Printf("[ID %d] could not update: %v", id, err)
+			msg.Nack()
+			return
+		}
 
-			countMu.Lock()
-			count++
-			countMu.Unlock()
+		countMu.Lock()
+		count++
+		countMu.Unlock()
 
-			msg.Done(true) // ACK
-			log.Printf("[ID %d] ACK", id)
-		}()
+		msg.Ack()
+		log.Printf("[ID %d] ACK", id)
+	})
+	if err != nil {
+		log.Fatal(err)
 	}
 }
 

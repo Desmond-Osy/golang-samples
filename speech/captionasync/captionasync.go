@@ -12,21 +12,24 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"strings"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/golang/protobuf/proto"
 
 	"golang.org/x/net/context"
 
-	speech "cloud.google.com/go/speech/apiv1beta1"
-	speechpb "google.golang.org/genproto/googleapis/cloud/speech/v1beta1"
+	speech "cloud.google.com/go/speech/apiv1"
+	speechpb "google.golang.org/genproto/googleapis/cloud/speech/v1"
 	longrunningpb "google.golang.org/genproto/googleapis/longrunning"
 )
 
 const usage = `Usage: captionasync <audiofile>
 
-Audio file is required to be 16-bit signed little-endian encoded
+Audio file must be a 16-bit signed little-endian encoded
 with a sample rate of 16000.
+
+The path to the audio file may be a GCS URI (gs://...).
 `
 
 func main() {
@@ -35,13 +38,22 @@ func main() {
 		os.Exit(2)
 	}
 
+	var sendFunc func(*speech.Client, string) (string, error)
+
+	path := os.Args[1]
+	if strings.Contains(path, "://") {
+		sendFunc = sendGCS
+	} else {
+		sendFunc = send
+	}
+
 	ctx := context.Background()
 	client, err := speech.NewClient(ctx)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	opName, err := send(client, os.Args[1])
+	opName, err := sendFunc(client, os.Args[1])
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -68,24 +80,25 @@ func send(client *speech.Client, filename string) (string, error) {
 
 	// Send the contents of the audio file with the encoding and
 	// and sample rate information to be transcripted.
-	req := &speechpb.AsyncRecognizeRequest{
+	req := &speechpb.LongRunningRecognizeRequest{
 		Config: &speechpb.RecognitionConfig{
-			Encoding:   speechpb.RecognitionConfig_LINEAR16,
-			SampleRate: 16000,
+			Encoding:        speechpb.RecognitionConfig_LINEAR16,
+			SampleRateHertz: 16000,
+			LanguageCode:    "en-US",
 		},
 		Audio: &speechpb.RecognitionAudio{
 			AudioSource: &speechpb.RecognitionAudio_Content{Content: data},
 		},
 	}
 
-	op, err := client.AsyncRecognize(ctx, req)
+	op, err := client.LongRunningRecognize(ctx, req)
 	if err != nil {
 		return "", err
 	}
 	return op.Name(), nil
 }
 
-func wait(client *speech.Client, opName string) (*speechpb.AsyncRecognizeResponse, error) {
+func wait(client *speech.Client, opName string) (*speechpb.LongRunningRecognizeResponse, error) {
 	ctx := context.Background()
 
 	opClient := longrunningpb.NewOperationsClient(client.Connection())
@@ -108,7 +121,7 @@ func wait(client *speech.Client, opName string) (*speechpb.AsyncRecognizeRespons
 	case op.GetError() != nil:
 		return nil, fmt.Errorf("recieved error in response: %v", op.GetError())
 	case op.GetResponse() != nil:
-		var resp speechpb.AsyncRecognizeResponse
+		var resp speechpb.LongRunningRecognizeResponse
 		if err := proto.Unmarshal(op.GetResponse().Value, &resp); err != nil {
 			return nil, err
 		}
@@ -117,4 +130,27 @@ func wait(client *speech.Client, opName string) (*speechpb.AsyncRecognizeRespons
 
 	// should never happen.
 	return nil, errors.New("no response")
+}
+
+func sendGCS(client *speech.Client, gcsURI string) (string, error) {
+	ctx := context.Background()
+
+	// Send the contents of the audio file with the encoding and
+	// and sample rate information to be transcripted.
+	req := &speechpb.LongRunningRecognizeRequest{
+		Config: &speechpb.RecognitionConfig{
+			Encoding:        speechpb.RecognitionConfig_LINEAR16,
+			SampleRateHertz: 16000,
+			LanguageCode:    "en-US",
+		},
+		Audio: &speechpb.RecognitionAudio{
+			AudioSource: &speechpb.RecognitionAudio_Uri{Uri: gcsURI},
+		},
+	}
+
+	op, err := client.LongRunningRecognize(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return op.Name(), nil
 }

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	// [START imports]
 	"golang.org/x/net/context"
@@ -95,6 +96,27 @@ func list(client *pubsub.Client) ([]*pubsub.Topic, error) {
 	// [END list_topics]
 }
 
+func listSubscriptions(client *pubsub.Client, topicID string) ([]*pubsub.Subscription, error) {
+	ctx := context.Background()
+
+	// [START list_topic_subscriptions]
+	var subs []*pubsub.Subscription
+
+	it := client.Topic(topicID).Subscriptions(ctx)
+	for {
+		sub, err := it.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		subs = append(subs, sub)
+	}
+	// [END list_topic_subscriptions]
+	return subs, nil
+}
+
 func delete(client *pubsub.Client, topic string) error {
 	ctx := context.Background()
 	// [START delete_topic]
@@ -111,42 +133,83 @@ func publish(client *pubsub.Client, topic, msg string) error {
 	ctx := context.Background()
 	// [START publish]
 	t := client.Topic(topic)
-	msgIDs, err := t.Publish(ctx, &pubsub.Message{
+	result := t.Publish(ctx, &pubsub.Message{
 		Data: []byte(msg),
 	})
+	// Block until the result is returned and a server-generated
+	// ID is returned for the published message.
+	id, err := result.Get(ctx)
 	if err != nil {
 		return err
 	}
-	for _, id := range msgIDs {
-		fmt.Printf("Published a message; msg ID: %v\n", id)
-	}
+	fmt.Printf("Published a message; msg ID: %v\n", id)
 	// [END publish]
 	return nil
 }
 
-func getPolicy(c *pubsub.Client, topicName string) *iam.Policy {
+func publishWithSettings(client *pubsub.Client, topic string, msg []byte) error {
+	ctx := context.Background()
+	// [START publish_settings]
+	t := client.Topic(topic)
+	t.PublishSettings = pubsub.PublishSettings{
+		ByteThreshold:  5000,
+		CountThreshold: 10,
+		DelayThreshold: 100 * time.Millisecond,
+	}
+	result := t.Publish(ctx, &pubsub.Message{Data: msg})
+	// Block until the result is returned and a server-generated
+	// ID is returned for the published message.
+	id, err := result.Get(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Published a message; msg ID: %v\n", id)
+	// [END publish_settings]
+	return nil
+}
+
+func publishSingleGoroutine(client *pubsub.Client, topic string, msg []byte) error {
+	ctx := context.Background()
+	// [START publish_single_goroutine]
+	t := client.Topic(topic)
+	t.PublishSettings = pubsub.PublishSettings{
+		NumGoroutines: 1,
+	}
+	result := t.Publish(ctx, &pubsub.Message{Data: msg})
+	// Block until the result is returned and a server-generated
+	// ID is returned for the published message.
+	id, err := result.Get(ctx)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Published a message; msg ID: %v\n", id)
+	// [END publish_single_goroutine]
+	return nil
+}
+
+func getPolicy(c *pubsub.Client, topicName string) (*iam.Policy, error) {
 	ctx := context.Background()
 
 	// [START pubsub_get_topic_policy]
 	policy, err := c.Topic(topicName).IAM().Policy(ctx)
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	for _, role := range policy.Roles() {
 		log.Print(policy.Members(role))
 	}
 	// [END pubsub_get_topic_policy]
-	return policy
+	return policy, nil
 }
 
-func addUsers(c *pubsub.Client, topicName string) {
+func addUsers(c *pubsub.Client, topicName string) error {
 	ctx := context.Background()
 
 	// [START pubsub_set_topic_policy]
 	topic := c.Topic(topicName)
 	policy, err := topic.IAM().Policy(ctx)
 	if err != nil {
-		log.Fatalf("GetPolicy: %v", err)
+		return err
 	}
 	// Other valid prefixes are "serviceAccount:", "user:"
 	// See the documentation for more values.
@@ -159,9 +222,10 @@ func addUsers(c *pubsub.Client, topicName string) {
 	// being modified concurrently. SetPolicy will return an error if the policy
 	// was modified since it was retrieved.
 	// [END pubsub_set_topic_policy]
+	return nil
 }
 
-func testPermissions(c *pubsub.Client, topicName string) []string {
+func testPermissions(c *pubsub.Client, topicName string) ([]string, error) {
 	ctx := context.Background()
 
 	// [START pubsub_test_topic_permissions]
@@ -171,11 +235,11 @@ func testPermissions(c *pubsub.Client, topicName string) []string {
 		"pubsub.topics.update",
 	})
 	if err != nil {
-		log.Fatal(err)
+		return nil, err
 	}
 	for _, perm := range perms {
 		log.Printf("Allowed: %v", perm)
 	}
 	// [END pubsub_test_topic_permissions]
-	return perms
+	return perms, nil
 }

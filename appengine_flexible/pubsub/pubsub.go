@@ -34,7 +34,7 @@ const maxMessages = 10
 func main() {
 	ctx := context.Background()
 
-	client, err := pubsub.NewClient(ctx, mustGetenv("GCLOUD_PROJECT"))
+	client, err := pubsub.NewClient(ctx, mustGetenv("GOOGLE_CLOUD_PROJECT"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func publishHandler(w http.ResponseWriter, r *http.Request) {
 		Data: []byte(r.FormValue("payload")),
 	}
 
-	if _, err := topic.Publish(ctx, msg); err != nil {
+	if _, err := topic.Publish(ctx, msg).Get(ctx); err != nil {
 		http.Error(w, fmt.Sprintf("Could not publish message: %v", err), 500)
 		return
 	}

@@ -2,6 +2,9 @@
 // Use of this source code is governed by the Apache 2.0
 // license that can be found in the LICENSE file.
 
+// NOTE(cbro): x/time/rate requires standard library context.
+//+build go1.7
+
 // Package e2e contains end-to-end tests for Go programs running on Google Cloud Platform.
 // See README.md for details on running the tests.
 package e2e
@@ -12,6 +15,7 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +26,19 @@ import (
 	"github.com/GoogleCloudPlatform/golang-samples/internal/aeintegrate"
 	"github.com/GoogleCloudPlatform/golang-samples/internal/testutil"
 )
+
+func init() {
+	// Workaround for Travis:
+	// https://docs.travis-ci.com/user/common-build-problems/#Build-times-out-because-no-output-was-received
+	if os.Getenv("TRAVIS") == "true" {
+		go func() {
+			for {
+				time.Sleep(5 * time.Minute)
+				log.Print("Still testing. Don't kill me!")
+			}
+		}()
+	}
+}
 
 // env:flex deployments are quite flaky when done in parallel.
 // Offset each deployment by some amount of time.
@@ -81,10 +98,6 @@ func TestStorage(t *testing.T) {
 
 	url, _ := storage.URL("/upload")
 	var body bytes.Buffer
-	req, err := http.NewRequest("POST", url, &body)
-	if err != nil {
-		t.Fatalf("NewRequest: %v", err)
-	}
 	const filename = "flexible-storage-e2e"
 	w := multipart.NewWriter(&body)
 	fw, err := w.CreateFormFile("file", filename)
@@ -93,6 +106,11 @@ func TestStorage(t *testing.T) {
 	}
 	fw.Write([]byte("hello"))
 	w.Close()
+
+	req, err := http.NewRequest("POST", url, &body)
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
 	req.Header.Set("Content-Type", w.FormDataContentType())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

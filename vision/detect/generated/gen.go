@@ -40,7 +40,7 @@ func main() {
 	gcs := string(tmpl)
 	gcs = strings.Replace(gcs, boilerplateSentinel, gcsBoilerplate, -1)
 	// Append suffix to function name.
-	gcs = strings.Replace(gcs, "(w io.Writer", "GCS(w io.Writer", -1)
+	gcs = strings.Replace(gcs, "(w io.Writer", "URI(w io.Writer", -1)
 	out.WriteString(gcs)
 
 	if err := ioutil.WriteFile("detect.go", out.Bytes(), 0640); err != nil {
@@ -48,11 +48,11 @@ func main() {
 	}
 }
 
-const boilerplateSentinel = "\t// Boilerplate is inserted by gen.go\n"
+const boilerplateSentinel = "\tvar client *vision.ImageAnnotatorClient // Boilerplate is inserted by gen.go\n"
 
 const boilerplate = `	ctx := context.Background()
 
-	client, err := vision.NewClient(ctx)
+	client, err := vision.NewImageAnnotatorClient(ctx)
 	if err != nil {
 		return err
 	}
@@ -70,12 +70,12 @@ const boilerplate = `	ctx := context.Background()
 `
 const gcsBoilerplate = `	ctx := context.Background()
 
-	client, err := vision.NewClient(ctx)
+	client, err := vision.NewImageAnnotatorClient(ctx)
 	if err != nil {
 		return err
 	}
 
-	image := vision.NewImageFromGCS(file)
+	image := vision.NewImageFromURI(file)
 `
 
 const header = `// Copyright 2017 Google Inc. All rights reserved.
